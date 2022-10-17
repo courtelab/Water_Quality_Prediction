@@ -1,0 +1,1147 @@
+---
+title: '**Water Quality Prediction**'
+subtitle: HarvardX Data Science Professional Certificate
+author: "Remi Courtellemont"
+date: "2022-09-29"
+output:
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+    fig_caption: yes
+include-before: '`\newpage{}`{=latex}'
+fontsize: 11pt
+urlcolor: blue
+---
+\floatplacement{figure}{H}
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, fig.align="center", out.width="70%")
+```
+\newpage
+
+# **Introduction**   
+
+"Accurate water quality prediction is the basis of water environment management and is of great significance for water environment protection. Water quality information exist in the form of multivariate time-series datasets. There is no doubt that the accuracy of water quality prediction will be improved if the multivariate correlation and time sequence data of water quality are fully used." [1]
+
+This project is a requirement for the HarvardX Data Science Professional Certificate Program which requires to use a publicly available dataset to solve the problem of our choice. Water Prediction Data available in UCI Machine Learning is chosen. The report is created using R Markdown in [RStudio](https://www.rstudio.com/products/rstudio/) that covers Data Preparation for Model Building, Data Exploration with common visualization techniques, Model Development using train and test sets, Model Evaluation using validation set and Concluding Remarks.
+
+## Objective
+
+The goal is to predict the spatio-temporal water quality in terms of the power of hydrogen (pH) value for the next day based on the historical data of water measurement indices. Root Mean Squared Error (RMSE) is used to evaluate the accuracy of the model by comparing the predicted values with the actual outcome on the testing set. The best model having the lowest RMSE value is used to predict the water quality.
+
+## Water Prediction Data
+
+[UCI Machine Learning Repository](https://archive-beta.ics.uci.edu/), is a collection of databases, domain theories, and data generators that are used by the machine learning community for the empirical analysis of machine learning algorithms. [UCI Machine Learning Repository](https://archive-beta.ics.uci.edu/ml/datasets/water+quality+prediction-1) provides the data sets of daily samples for 37 sites, providing measurements related to pH values in Georgia, USA. The input features consist of 11 common indices including volume of dissolved oxygen, temperature, and specific conductance. The output to predict is the measurement of **'pH, water, unfiltered, field, standard units (Median)'**
+\newpage
+
+# **Data Preparation**  
+
+In the data preparation step, the Water Prediction data is downloaded and prepared for exploration, modeling and model evaluation using needed packages and libraries.
+
+## Install Required Packages
+
+To prepare and transform the data, required packages are installed and necessary libraries are loaded.
+
+```{r}
+# Note: this process could take a couple of minutes
+# Install packages if needed
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(R.matlab)) install.packages("R.matlab", repos = "http://cran.us.r-project.org")
+if(!require(plyr)) install.packages("plyr", repos = "http://cran.us.r-project.org")
+if(!require(lubridate)) install.packages("lubridate", repos = "http://cran.us.r-project.org")
+if(!require(pls)) install.packages("lubridate", repos = "http://cran.us.r-project.org")
+if(!require(matrixStats)) install.packages("matrixStats", repos = "http://cran.us.r-project.org")
+if(!require(kableExtra)) install.packages("kableExtra", repos = "http://cran.us.r-project.org")
+# Load required libraries
+library(tidyverse)
+library(caret)
+library(data.table)
+library(R.matlab)
+library(plyr)
+library(lubridate)
+library(pls)
+library(matrixStats)
+library(kableExtra)
+```
+
+## Download Water Prediction Data
+
+First, the Water Prediction data set is downloaded from [UCI Machine Learning Repository](https://archive-beta.ics.uci.edu/).
+
+```{r}
+dl <- tempfile()
+download.file("https://archive-beta.ics.uci.edu/api/static/ml/datasets/733/data.zip", dl)
+my_data <- readMat(unzip(dl, "water_dataset.mat"))
+```
+
+The Water Prediction data is a `r class(my_data)`.
+The names of the different variables are: `r names(my_data)`.
+
+The readme.docx available in the zip data can be useful to really get the meanings of each `r class(my_data)`.
+
+## Creation of training and testing sets
+### Extraction
+The training (.tr) and testing sets (.te) are already built.
+Features (X) and output (Y) are in separated lists.
+
+```{r}
+# extraction of the training set from list to data.frame
+train_set <- ldply(my_data$X.tr, data.frame)
+# extraction of the testing set from list to data.frame
+test_set <- ldply(my_data$X.te, data.frame) 
+```
+The variable name of the training set in the code is **train_set**.
+The variable name of the testing set in the code is **test_set**.
+
+### Stations
+The training set has `r format(nrow(train_set),big.mark=",",scientific=F)` instances and the testing sets `r format(nrow(test_set),big.mark=",",scientific=F)` instances.
+According to the readme document, there are 37 stations so we add the stations number in the training and testing sets.
+
+```{r}
+# adding stations to training set
+stations <- rep(seq(1, 37), times = 423) # creating the stations' list
+train_set <- train_set %>%
+  cbind(stations) %>% # adding station number to the train set
+  mutate(stations = as.character(stations))
+# adding stations to testing set
+stations <- rep(seq(1, 37), times = 282)  # creating the stations' list
+test_set <- test_set %>%
+  cbind(stations) %>% # adding station number to the test set
+  mutate(stations = as.character(stations))
+```
+
+### Dates
+For the training set, the readme document indicates that the dates start from 2016-01-28 with 423 contiguous dates.
+For the testing set, it indicates that the dates finish at 2018-01-01 with 282 contiguous dates.
+It means that the training period finish the 25th of march 2017 and the testing period starts from the next day.
+
+```{r}
+# adding dates to training set
+date <- rep(ymd(20160128):ymd(20170325), each = 37) # creating the dates' list
+train_set <- train_set %>%
+  cbind(date) %>% # adding the dates to the train set
+  mutate(date = as_date(date)) # converting date to lubridate format
+# adding dates to testing set
+date <- rep(ymd(20170326):ymd(20180101), each = 37) # creating the dates' list
+test_set <- test_set %>%
+  cbind(date) %>%  # adding the dates to the test set
+  mutate(date = as_date(date)) # converting date to lubridate format
+```
+
+### input Y.J0
+As a reminder, the goal is to predict the spatio-temporal water quality in terms of the power of hydrogen (pH) value for the next day **Y.J1** based on the historical data of water measurement indices.
+
+For this study, it is considered that the value for the same day **Y.J0** is known, and used as an input for the prediction.
+
+We extract and add Y.J0 (value of pH for the **same** day) at each instances of the training and testing sets.
+
+```{r}
+# adding input (Y.J0) to training set
+Y.J0.tr <- ldply(my_data$Y.tr, data.frame) # extraction of the input from list to data frame
+train_set <- train_set %>%
+  cbind(Y.J0.tr) # adding to the data frame of the train set
+names(train_set)[14] <- "Y.J0"
+# adding input (Y.J0) to testing set
+Y.J0.te <- ldply(my_data$Y.te, data.frame) # extraction of the input from list to data frame
+test_set <- test_set %>%
+  cbind(Y.J0.te) # adding to the data frame of the train set
+names(test_set)[14] <- "Y.J0"
+```
+
+### Output Y.J1
+For each instances, we also add the output to predict **Y.J1** (value of pH for the **next** day), which is the value we want to predict, to the training and testing sets.
+
+```{r}
+# adding output (Y.J1) to training set
+train_set <- train_set[-((nrow(train_set)-36):nrow(train_set)),]  # removing the 37 last rows (no prediction possible for next day)
+temp <- Y.J0.tr[-(1:37),]
+train_set <- train_set %>%
+  cbind(temp) # adding the J+1 output to the train set for prediction
+names(train_set)[15] <- "Y.J1"
+# adding output (Y.J1) to testing set
+test_set <- test_set[-((nrow(test_set)-36):nrow(test_set)),]  # removing the 37 last rows (no prediction possible for next day)
+temp <- Y.J0.te[-(1:37),]
+test_set <- test_set %>%
+  cbind(temp)    # adding the J+1 output to the test set for prediction
+names(test_set)[15] <- "Y.J1"
+rm(temp)
+```
+
+Once **Y.J1** is added to the date just before, the rows with the latest date of training and testing sets are removed. It is necessary because there is no output in that case.
+
+### Predictors
+The data includes 11 predictors.
+
+Their names in the training and testing sets are `r names(train_set[1:11])`.
+
+```{r}
+i <- seq(1, 11)
+names.pred <- sapply(i, function(j){ # changing predictors name
+my_data$features[[j]][[1]][[1]]
+})
+rm(i)
+```
+
+The real names of the predictors are listed in the variable "features" of the data:
+
+X1 -> `r names.pred[1]`
+
+X2 -> `r names.pred[2]`
+
+X3 -> `r names.pred[3]`
+
+X4 -> `r names.pred[4]`
+
+X5 -> `r names.pred[5]`
+
+X6 -> `r names.pred[6]`
+
+X7 -> `r names.pred[7]`
+
+X8 -> `r names.pred[8]`
+
+X9 -> `r names.pred[9]`
+
+X10 -> `r names.pred[10]`
+
+X11 -> `r names.pred[11]`
+
+Instead of giving their full names to the predictors of the training and testing sets, we build 3 groups of predictors, which include maximum, minimum and mean values of a certain parameter:
+
+Group P1: X1, X4, X5
+
+Group P2: X2, X3
+
+Group P3: X6, X7, X8
+
+Group P4: X9, X10, X11
+
+It has to be noted that group P2 correspond to the max and min of the median value we want to predict.
+
+```{r}
+names.pred <- c("P1.max",
+                "P2.max",
+                "P2.min",
+                "P1.min",
+                "P1.mean",
+                "P3.max",
+                "P3.mean",
+                "P3.min",
+                "P4.mean",
+                "P4.min",
+                "P4.max")
+```
+
+We can rename the predictors in the training and testing sets with the group names, as follow:
+
+`r names.pred`.
+
+```{r}
+names(train_set)[1:11] <- names.pred # modifying the predictors names of the training set
+names(test_set)[1:11] <- names.pred # modifying the predictors names of the testing set
+```
+
+### Water Systems
+The stations are divided into 3 water systems. In each system, the stations are connected.
+
+It is interesting on a modeling point of view to add the system each station belongs (This information indicates spatial dependency among different locations which are important to the forecast).
+
+```{r}
+G1 <- my_data$location.group[[1]][[1]]
+G2 <- my_data$location.group[[2]][[1]]
+G3 <- my_data$location.group[[3]][[1]]
+
+train_set <- train_set %>%
+  mutate(System = ifelse(stations %in% G1, "G1", ifelse(stations %in% G2, "G2", "G3")))
+
+test_set <- test_set %>%
+  mutate(System = ifelse(stations %in% G1, "G1", ifelse(stations %in% G2, "G2", "G3")))
+```
+
+G1 system includes the following station: `r G1`
+
+G2 system includes the following stations: `r G2`
+
+G3 system includes the following stations: `r G3`
+\newpage
+
+# **Data Exploration and Analysis**  
+Next step is to analyze the content of the data, to see if we can arrange it differently to facilitate the understanding and modeling.
+
+## Data Overview
+The training set is built with `r format(nrow(train_set),big.mark=",",scientific=F)` rows and `r format(ncol(train_set),big.mark=",",scientific=F)` columns.
+
+An instance represents 11 predictors, the station number, the date of measurement, the output value of the day, output value of the next day (to be predicted), and the water system it belongs to.
+
+```{r}
+# Data Overview
+head(train_set[,1:8],5) %>% knitr::kable(caption = "Train Set Overview, columns 1 to 8", booktabs = T, linesep = "") %>% kable_styling(full_width = FALSE, position = "center", latex_options = c("hold_position"))
+head(train_set[,9:16],5) %>% knitr::kable(caption = "Train Set Overview, columns 9 to 16", booktabs = T, linesep = "") %>% kable_styling(full_width = FALSE, position = "center", latex_options = c("hold_position"))
+```
+\newpage
+
+## Vizualizing output
+The input **Y.J0** and output **Y.J1** are  representing the median value of pH respectively the day and the next day of measurement (date).
+
+the minimum value of Y.J1 in the training set is `r format(min(train_set$Y.J1),big.mark=",",scientific=F)`
+
+the maximum value of Y.J1 in the training set is `r format(max(train_set$Y.J1),big.mark=",",scientific=F)`
+
+
+```{r fig.cap="Y.J1 versus time"}
+# Output Y.J1 of the training set
+train_set %>% ggplot(aes(x = date, y = Y.J1)) +
+  geom_point(size = 0.3)  +
+  labs(x = "Date",y = "Median value of pH")
+```
+
+On the plot above, the output has a fixed step between each value.
+
+In the training set, we have `r n_distinct(train_set$Y.J1)` levels.
+
+The distance between each level is a constant step, which value is `r dist(sort(unique(train_set$Y.J1)))[1]`
+
+This real values of the outputs are very small so the RMSE calculated will be hard to interpret.
+So Y.J0 and Y.J1 are divided by this distance in order for the levels and RMSE to be more understandable:
+if RMSE is higher than 1, it means that there is a global error between prediction and output of 1 level.
+
+
+```{r}
+# distance between levels is recorded
+dist_out <- dist(sort(unique(train_set$Y.J0)))[1]
+# Standardizing the income and outcome values in the training set
+train_set <- train_set %>%
+  mutate(Y.J0 = Y.J0/dist_out) %>%
+  mutate(Y.J1 = Y.J1/dist_out)
+```
+
+The new outputs have the following characteristics:
+
+- the minimum value of Y.J1 in the training set is `r format(min(train_set$Y.J1),big.mark=",",scientific=F)`
+
+- the maximum value of Y.J1 in the training set is `r format(max(train_set$Y.J1),big.mark=",",scientific=F)`
+
+\newpage
+
+In the density curve below, we can see that, if we consider all the values of Y.J1,the distribution of values has 2 modes. The shape is not a Gaussian.
+
+```{r fig.cap="Output Y.J1 density curve of training sets"}
+train_set %>%
+  ggplot(aes(x = Y.J1)) +
+  geom_density(bw = 0.5) +
+  scale_x_continuous(limits = c(min(train_set$Y.J1), max(train_set$Y.J1)))
+```
+
+## Vizualizing predictors
+
+In the training set, we have the following mean and standard deviation for each predictor:
+
+```{r}
+data.frame("Mean" = colMeans(select(train_set, c(-12, -13, -14, -15, -16))),
+           "Standard Deviation" = colSds(as.matrix(select(train_set, c(-12, -13, -14, -15, -16))))) %>%
+  knitr::kable(caption = "Mean and SD of predictors of training set", booktabs = T, linesep = "") %>%
+  kable_styling(full_width = FALSE, position = "center", latex_options = c("hold_position"))
+```
+
+\newpage
+
+If we generate a boxplot, we obtain the following drawing:
+
+```{r fig.cap="Boxplot of the predictors of the training set"}
+pred_set <- select(train_set, c(-12, -13, -14, -15)) %>%
+  pivot_longer(cols = seq(1, 11), names_to = "predictor")
+pred_set %>%
+  ggplot(aes(y = value, fill = predictor)) +
+  geom_boxplot()
+```
+
+4 groups of predictors can be identified, with similar variations:
+
+**P1.max + P1.min + P2.min** are almost always at 0 but with outliers. They do not seem useful for our prediction.
+
+**P1.mean + P3.mean + P3.min** have a median value between 0.56 and 0.60 and a medium SD between 0.12 and 0.17.
+
+**P4.max + P4.mean + P4.min** have a median value between 0.53 and 0.55 and a large SD around 0.20
+
+**P2.max + P3.max** have a high median value between 0.85 and 0.88 and a small SD around 0.03.
+
+\newpage
+
+## Relation between predictors, input and output
+The data frame of the predictors and outputs of the training set is scaled.
+
+Then the distance matrix is calculated and the heatmap of this matrix is plotted.
+
+```{r fig.cap="Heatmap of distance matrix of the training set"}
+## Scaling the matrix
+set_scale <- train_set %>%
+  select(1:11, 14, 15) # keeping only predictors and outputs
+x_centered <- sweep(set_scale, 2, colMeans(set_scale))  # centering the data frame
+x_scaled <- sweep(x_centered, 2, colSds(as.matrix(set_scale)), FUN = "/")  # normalizing the data frame
+
+## Distance
+d_features <- dist(t(x_scaled))
+heatmap(as.matrix(d_features))
+```
+
+The heatmap of distance matrix show a connection between P2.max, P3.max, Y.J0 and Y.J1.
+
+```{r}
+## Clustering
+h <- hclust(d_features)
+groups <- cutree(h, k = 4) # groups
+split(names(groups), groups)
+
+```
+
+In the clustering above,P2.max, P3.max, Y.J0 and Y.J1 are together in a cluster.
+
+\newpage
+
+This cluster is confirmed by the correlation matrix below.
+
+```{r fig.cap="Correlation image of the training set"}
+# Image function
+my_image <- function(x, zlim = range(x), ...){
+  colors = rev(RColorBrewer::brewer.pal(9, "RdBu"))
+  cols <- 1:ncol(x)
+  rows <- 1:nrow(x)
+  image(cols, rows, t(x[rev(rows),,drop=FALSE]), xaxt = "n", yaxt = "n",
+        xlab="", ylab="",  col = colors, zlim = zlim, ...)
+  abline(h=rows + 0.5, v = cols + 0.5)
+  axis(side = 1, cols, colnames(x), las = 2)
+  axis(side = 2, 1:ncol(x), rev(colnames(x)), las = 2)
+}
+
+# Imaging the correlation
+my_image(cor(x_scaled), zlim = c(-1,1))
+```
+
+On the plot above, the output Y.J1 is significantly correlated to predictors Y.J0, P2.max and P3.max.
+
+In details, here is the correlation of Y.J1 with all predictors:
+
+```{r}
+# Values of correlations with Y.J1 of all predictors
+data.frame("correlation_with_Y.J1" = cor(x_scaled)[,"Y.J1"]) %>%
+  knitr::kable(caption = "Correlation of Y.J1 with predictors and Y.J0 on training set", booktabs = T, linesep = "") %>%
+  kable_styling(full_width = FALSE, position = "center", latex_options = c("hold_position"))
+```
+
+\newpage
+
+The correlation between each station and their predictors P2.max, P3.max and input Y.J0 can be calculated.
+
+```{r}
+# Detail of correlation with P2.max, P3.max and Y.J0 for every single station
+i <- seq(1, 37)
+cor_detail <- sapply(i, function(j){
+  set_scale <- train_set %>%
+    filter(stations == j) %>%
+    select(1:11, 14, 15) # keeping only predictors and outputs
+  x_centered <- sweep(set_scale, 2, colMeans(set_scale))  # centering the data frame
+  x_scaled <- sweep(x_centered, 2, colSds(as.matrix(set_scale)), FUN = "/")  # normalizing the data frame
+  cor(x_scaled)[,"Y.J1"][c(2,6,12)]
+})
+
+data.frame(t(cor_detail)) %>%
+  mutate(stations = 1:37) %>%
+  pivot_longer(cols = 1:3, names_to = "comp", values_to = "correlation_with_Y.J1") %>%
+  ggplot(aes(x = stations, y = correlation_with_Y.J1)) +
+  geom_point() +
+  geom_label(aes(label = stations)) +
+  facet_grid(. ~ comp)
+```
+
+It appears that the correlation with P2.max, P3.max and Y.J0 is not high for all stations.
+There are some stations with low correlation, for example station 29 is not correlated at all with P2.max and P3.max, and not much with Y.J0.
+The variance of correlation within stations might have an impact on the accuracy of group models for some stations.
+
+\newpage
+
+The principal component analysis of the distance scaled matrix gives the following repartition of importance of components:
+
+```{r}
+# principal components calculation
+pca <- prcomp(x_scaled)
+summary(pca)
+```
+
+PC1 and PC2 explain more than 75% of the cumulative proportion of variance.
+
+Adding PC3 make it up to more than 90%.
+
+When plotting PC1 vs PC2, it appears that the output is high when PC2 is high and low when PC2 is low.
+However, it is hard to detect the value of output just with PC1 and PC2.
+
+```{r fig.cap="The 2 first principal components of the training set"}
+# PC1 and PC2 plot
+data.frame(pca$x[,1:2], output = set_scale$Y.J1) %>%
+  ggplot(aes(PC1, PC2, color = output)) +
+  geom_point(size = 0.3) +
+  scale_color_gradient(low="blue", high="red") +
+  geom_smooth()
+```
+
+\newpage
+
+Last observation: if the difference between Y.J1 and Y.J0 is plotted for all instances of the training set, the output is the same as the input in the majority of the cases.
+
+```{r fig.cap="Difference Y.J1 - Y.J0 on training set"}
+# Difference between Y.J1 and Y.J0
+train_set %>%
+  qplot(Y.J1-Y.J0, geom ="histogram", bins = 50, data = ., color = I("black"))  +
+  scale_x_continuous(limits = c(-10, 10))
+```
+
+
+\newpage
+
+# **Model Development and final holdout test** 
+The water prediction model is developed using the training set (train_set) and the final holdout test is performed on the reserved testing set (test_set).
+
+It is decided to create models for each group of water systems (G1, G2 and G3).
+It is considered that in each group of water systems, the interconnection of stations creates similarities in the results.
+This way, only 3 models are needed for each of the 3 groups of water systems. This is the best way to quickly obtain results.
+However, it is expected that the models built from water systems might not have the same efficiency on all stations of the group (remember the correlation variance with P2.max, P3.max and Y.J0 at stations level).
+
+## Splitting training set into train and validation sets
+The training set is split into a train set and a validation set with 80% and 20% of the original training set (train_set) respectively.
+In case of validation, the 80/20 split is a usual value to have sufficient material for training (80%) and a minimum amount of material to test (20%).
+Moreover, the test set is already built separately, so we do not need more split of the training set that could justify to reduce the previous validation split of 20%.
+We select the stations feature to make the split, so that there are the same proportion of stations in the 2 sets.
+The train set is called **train** in the code, and the validation set is called the **validation** in the code.
+The model is developed using **train** and tested with **validation** before the final hold-out test on the testing set (test_set).
+
+```{r}
+# split the training set into train and validation set
+set.seed(1, sample.kind = "Rounding")
+test_index <- createDataPartition(y = train_set$stations, times = 1, p = 0.2, list = FALSE)
+train <- train_set[-test_index,]
+validation <- train_set[test_index,]
+```
+
+We divide the data (train and validation) into sets of water systems.
+
+```{r}
+train_G1 <- train %>%
+  filter(System == "G1")
+train_G2 <- train %>%
+  filter(System == "G2")
+train_G3 <- train %>%
+  filter(System == "G3")
+validation_G1 <- validation %>%
+  filter(System == "G1")
+validation_G2 <- validation %>%
+  filter(System == "G2")
+validation_G3 <- validation %>%
+  filter(System == "G3")
+```
+
+
+## Root Mean Squared Error (RMSE)
+
+Root Mean Squared Error shows how far the model prediction falls from the actual outcome. In other words, it is the standard deviation of the prediction errors which indicates how spread the data is. The error term is the difference between the predicted value and the actual outcome (Glen 2020). 
+
+RMSE for a model is calculated using the formula below:
+
+$$RMSE = \sqrt{\frac{1}{N}\sum\left(\hat{y}-y\right)^2}$$ 
+```{r}
+RMSE <- function(true_ratings, predicted_ratings){
+  sqrt(mean((true_ratings - predicted_ratings)^2))
+}
+```
+
+
+\newpage
+
+## Model Development and RMSE Calculation
+We apply regression models to the 3 different water systems G1, G2 and G3.
+
+### Selected models
+The influence of interconnected water systems and environment on the output can be complex.
+The training set has been recorded for 1 year and 3 months, whereas the testing set last for 9 months.
+The water systems situation can be very different between years, and external influence might occur.
+The output could be outside of the range of the training set.
+We need models with good extrapolation.
+Then, it is decided to choose the following models:
+
+- The model 1 is simply based on previous observations.
+
+- The model 2 is a simple linear regression.
+
+- The model 3 is a more sophisticated machine learning algorithm based on neural networks.
+
+- The model 4 is the principal component regression, when unknown coefficients apply.
+
+### Model 1: Y.J1 = Y.J0
+As noticed previously, in majority of the cases, the output remains the same the next day.
+
+So the first model can be Y.J1 = Y.J0.
+This model measured with the validation set gives the following RMSE.
+
+```{r}
+# calculating RMSE for model 1
+rmse_g1_m1 <- RMSE(validation_G1$Y.J0, validation_G1$Y.J1)
+rmse_g2_m1 <- RMSE(validation_G2$Y.J0, validation_G2$Y.J1)
+rmse_g3_m1 <- RMSE(validation_G3$Y.J0, validation_G3$Y.J1)
+
+# Tabulate RMSE
+RMSE_Table_global.tr <- tibble(Water_System = c("G1","G2","G3"),
+                     RMSE_Model_1 = c(rmse_g1_m1, rmse_g2_m1, rmse_g3_m1))
+RMSE_Table_global.tr %>%
+  knitr::kable(caption = "RMSE for Model 1 - Validation Stage", booktabs = T, linesep = "") %>%
+  kable_styling(full_width = FALSE, latex_options = c("hold_position"))
+```
+
+\newpage
+
+### Model 2: LM
+The linear regression from Caret package is used for Model 2.
+In order to avoid over-training, we use the 3 predictors that are correlated to Y.J1, which are : P2.max, P3.max, Y.J0 and the stations' number (except group 1 which includes only 1 station).
+
+```{r}
+# Building "lm" model of caret package
+# G1
+fit_g1_m2.tr <- train(Y.J1 ~ P2.max + P3.max + Y.J0,
+                   method = "lm",
+                   data = train_G1)
+set.seed(1, sample.kind = "Rounding")
+Y.hat_g1_m2 <- predict(fit_g1_m2.tr, validation_G1)
+rmse_g1_m2 <- RMSE(validation_G1$Y.J1, Y.hat_g1_m2)
+# G2
+fit_g2_m2.tr <- train(Y.J1 ~ P2.max + P3.max + Y.J0 + stations,
+                   method = "lm",
+                   data = train_G2)
+set.seed(1, sample.kind = "Rounding")
+Y.hat_g2_m2 <- predict(fit_g2_m2.tr, validation_G2)
+rmse_g2_m2 <- RMSE(validation_G2$Y.J1, Y.hat_g2_m2)
+#G3
+fit_g3_m2.tr <- train(Y.J1 ~ P2.max + P3.max + Y.J0 + stations,
+                   method = "lm",
+                   data = train_G3)
+set.seed(1, sample.kind = "Rounding")
+Y.hat_g3_m2 <- predict(fit_g3_m2.tr, validation_G3)
+rmse_g3_m2 <- RMSE(validation_G3$Y.J1, Y.hat_g3_m2)
+
+# Tabulate group RMSE
+RMSE_Table_global.tr <- cbind(RMSE_Table_global.tr, tibble(RMSE_Model_2 = c(rmse_g1_m2, rmse_g2_m2, rmse_g3_m2)))
+RMSE_Table_global.tr %>%
+  knitr::kable(caption = "RMSE for Models 1/2 - Validation Stage", booktabs = T, linesep = "") %>%
+  kable_styling(full_width = FALSE, latex_options = c("hold_position"))
+```
+
+
+### Model 3: BRNN
+The Bayesian Regularized Neural Networks (BRNN) is used for model 3.
+The 3 predictors that are correlated to Y.J1 are used for the training : P2.max, P3.max, Y.J0 and stations.
+The best tune of parameter 'neurons' is searched between 1 and 2 with the validation set.
+
+```{r include=FALSE}
+# Building "brnn" model of caret package
+# tuning parameter neurons (1 or 2 to avoid delay) with the 3 groups
+# G1
+i <- seq(1, 2, 1)
+rmse_g1_m3.tr <- sapply(i, function(j){
+  fit_g1_m3 <- train(Y.J1 ~ P2.max + P3.max + Y.J0,
+                     method = "brnn",
+                     tuneGrid = expand.grid(neurons = j),
+                     data = train_G1)
+  set.seed(1, sample.kind = "Rounding")
+  Y.hat_g1_m3 <- predict(fit_g1_m3, validation_G1)
+  RMSE(validation_G1$Y.J1, Y.hat_g1_m3)
+})
+# G2
+i <- seq(1, 2, 1)
+rmse_g2_m3.tr <- sapply(i, function(j){
+  fit_g2_m3 <- train(Y.J1 ~ P2.max + P3.max + Y.J0 + stations,
+                     method = "brnn",
+                     tuneGrid = expand.grid(neurons = j),
+                     data = train_G2)
+  set.seed(1, sample.kind = "Rounding")
+  Y.hat_g2_m3 <- predict(fit_g2_m3, validation_G2)
+  RMSE(validation_G2$Y.J1, Y.hat_g2_m3)
+})
+# G3
+i <- seq(1, 2, 1)
+rmse_g3_m3.tr <- sapply(i, function(j){
+  fit_g3_m3 <- train(Y.J1 ~ P2.max + P3.max + Y.J0 + stations,
+                     method = "brnn",
+                     tuneGrid = expand.grid(neurons = j),
+                     data = train_G3)
+  set.seed(1, sample.kind = "Rounding")
+  Y.hat_g3_m3 <- predict(fit_g3_m3, validation_G3)
+  RMSE(validation_G3$Y.J1, Y.hat_g3_m3)
+})
+
+# Selection of the best tuning parameter ncomp
+k_g1_m3 <- i[which.min(rmse_g1_m3.tr)]
+k_g2_m3 <- i[which.min(rmse_g2_m3.tr)]
+k_g3_m3 <- i[which.min(rmse_g3_m3.tr)]
+
+# Best rmse with the best tuning parameter
+rmse_g1_m3 <- min(rmse_g1_m3.tr)
+rmse_g2_m3 <- min(rmse_g2_m3.tr)
+rmse_g3_m3 <- min(rmse_g3_m3.tr)
+```
+
+The best tune of 'neurons' parameter for G1 is `r k_g1_m3` and the minimum of rmse is `r rmse_g1_m3`.
+
+The best tune of 'neurons' parameter for G2 is `r k_g2_m3` and the minimum of rmse is `r rmse_g2_m3`.
+
+The best tune of 'neurons' parameter for G1 is `r k_g3_m3` and the minimum of rmse is `r rmse_g3_m3`.
+
+
+```{r}
+# Tabulate RMSE
+RMSE_Table_global.tr <- cbind(RMSE_Table_global.tr, tibble(RMSE_Model_3 = c(rmse_g1_m3, rmse_g2_m3, rmse_g3_m3)))
+RMSE_Table_global.tr %>%
+  knitr::kable(caption = "RMSE for Models 1/2/3 - Validation Stage", booktabs = T, linesep = "") %>%
+  kable_styling(full_width = FALSE, latex_options = c("hold_position"))
+```
+
+\newpage
+
+### Model 4: PCR
+The Principal Components Regression from Caret package is used for model 4.
+The 3 predictors that are correlated to Y.J1 are used for the training : P2.max, P3.max, Y.J0 and stations.
+The best tune of parameter ncomp is searched with the validation set.
+
+```{r}
+# Building "pcr" model of caret package
+# tuning parameter ncomp with the 3 groups
+# G1
+i <- seq(1, 3, 1)
+rmse_g1_m4.tr <- sapply(i, function(j){
+  fit_g1_m4 <- train(Y.J1 ~ P2.max + P3.max + Y.J0,
+                     method = "pcr",
+                     tuneGrid = expand.grid(ncomp = j),
+                     data = train_G1)
+  set.seed(1, sample.kind = "Rounding")
+  Y.hat_g1_m4 <- predict(fit_g1_m4, validation_G1)
+  RMSE(validation_G1$Y.J1, Y.hat_g1_m4)
+})
+# G2
+i <- seq(1, 4, 1)
+rmse_g2_m4.tr <- sapply(i, function(j){
+  fit_g2_m4 <- train(Y.J1 ~ P2.max + P3.max + Y.J0 + stations,
+                     method = "pcr",
+                     tuneGrid = expand.grid(ncomp = j),
+                     data = train_G2)
+  set.seed(1, sample.kind = "Rounding")
+  Y.hat_g2_m4 <- predict(fit_g2_m4, validation_G2)
+  RMSE(validation_G2$Y.J1, Y.hat_g2_m4)
+})
+# G3
+i <- seq(1, 4, 1)
+rmse_g3_m4.tr <- sapply(i, function(j){
+  fit_g3_m4 <- train(Y.J1 ~ P2.max + P3.max + Y.J0 + stations,
+                     method = "pcr",
+                     tuneGrid = expand.grid(ncomp = j),
+                     data = train_G3)
+  set.seed(1, sample.kind = "Rounding")
+  Y.hat_g3_m4 <- predict(fit_g3_m4, validation_G3)
+  RMSE(validation_G3$Y.J1, Y.hat_g3_m4)
+})
+
+# Selection of the best tuning parameter ncomp
+k_g1_m4 <- i[which.min(rmse_g1_m4.tr)]
+k_g2_m4 <- i[which.min(rmse_g2_m4.tr)]
+k_g3_m4 <- i[which.min(rmse_g3_m4.tr)]
+
+# Best rmse with the best tuning parameter
+rmse_g1_m4 <- min(rmse_g1_m4.tr)
+rmse_g2_m4 <- min(rmse_g2_m4.tr)
+rmse_g3_m4 <- min(rmse_g3_m4.tr)
+```
+
+The best tune of ncomp parameter is `r k_g1_m4` and the minimum of rmse for G1 group is `r rmse_g1_m4`.
+
+The best tune of ncomp parameter is `r k_g2_m4` and the minimum of rmse for G2 group is `r rmse_g2_m4`.
+
+The best tune of ncomp parameter is `r k_g3_m4` and the minimum of rmse for G3 group is `r rmse_g3_m4`.
+
+
+```{r}
+# Tabulate RMSE
+RMSE_Table_global.tr <- cbind(RMSE_Table_global.tr, tibble(RMSE_Model_4 = c(rmse_g1_m4, rmse_g2_m4, rmse_g3_m4)))
+RMSE_Table_global.tr %>%
+  knitr::kable(caption = "RMSE for Models 1/2/3/4 - Training Set", booktabs = T, linesep = "") %>%
+  kable_styling(full_width = FALSE, latex_options = c("hold_position"))
+```
+
+\newpage
+
+### Details for each station
+
+Let's have a look deeper inside the RMSE results of each station for each model.
+
+First, we need to build the models 3 and 4 with the best tune.
+
+```{r include=FALSE}
+# Fitting model 3 (brnn) with best tuning parameter
+fit_g1_m3.tr <- train(Y.J1 ~ P2.max + P3.max + Y.J0,
+                      method = "brnn",
+                      tuneGrid = expand.grid(neurons = k_g1_m3),
+                      data = train_G1)
+
+fit_g2_m3.tr <- train(Y.J1 ~ P2.max + P3.max + Y.J0 + stations,
+                      method = "brnn",
+                      tuneGrid = expand.grid(neurons = k_g2_m3),
+                      data = train_G2)
+
+fit_g3_m3.tr <- train(Y.J1 ~ P2.max + P3.max + Y.J0 + stations,
+                      method = "brnn",
+                      tuneGrid = expand.grid(neurons = k_g3_m3),
+                      data = train_G3)
+
+# Fitting model 4 (pcr) with best tuning parameter
+fit_g1_m4.tr <- train(Y.J1 ~ P2.max + P3.max + Y.J0,
+                   method = "pcr",
+                   tuneGrid = expand.grid(ncomp = k_g1_m4),
+                   data = train_G1)
+
+fit_g2_m4.tr <- train(Y.J1 ~ P2.max + P3.max + Y.J0 + stations,
+                   method = "pcr",
+                   tuneGrid = expand.grid(ncomp = k_g2_m4),
+                   data = train_G2)
+
+fit_g3_m4.tr <- train(Y.J1 ~ P2.max + P3.max + Y.J0 + stations,
+                   method = "pcr",
+                   tuneGrid = expand.grid(ncomp = k_g3_m4),
+                   data = train_G3)
+
+```
+
+Then, we generate the predictions for all models.
+
+```{r}
+######### Model 1
+# creating the table for stations inside G1 group for model 1
+RMSE_Table_G1.tr <- tibble(Stations = as.character(G1),
+                        Model_Observations = RMSE(validation_G1$Y.J0, validation_G1$Y.J1))
+
+# Looking at RMSE inside G2 group for model 1
+i <- as.character(G2)
+rmse_g2_m1_detail <- sapply(i, function(j){
+  set <- validation_G2 %>%
+    filter(stations == j)
+  RMSE(set$Y.J0, set$Y.J1)
+})
+
+# creating the table for stations inside G2 group for model 1
+RMSE_Table_G2.tr <- tibble(Stations = as.character(G2),
+                        Model_Observations = rmse_g2_m1_detail)
+
+# Looking at RMSE inside G3 group for model 1
+i <- as.character(G3)
+rmse_g3_m1_detail <- sapply(i, function(j){
+  set <- validation_G3 %>%
+    filter(stations == j)
+  RMSE(set$Y.J0, set$Y.J1)
+})
+
+# creating the table for stations inside G3 group for model 1
+RMSE_Table_G3.tr <- tibble(Stations = as.character(G3),
+                        Model_Observations = rmse_g3_m1_detail)
+
+
+########### Model 2
+# creating the table for stations inside G1 group for model 2
+RMSE_Table_G1.tr <- cbind(RMSE_Table_G1.tr,
+                       tibble(Model_Linear_Regression = RMSE(predict(fit_g1_m2.tr, validation_G1), validation_G1$Y.J1)))
+
+# Looking at RMSE inside G2 group for model 2
+i <- as.character(G2)
+rmse_g2_m2_detail <- sapply(i, function(j){
+  set <- validation_G2 %>%
+    filter(stations == j)
+  Y.hat <- predict(fit_g2_m2.tr, set)
+  RMSE(set$Y.J1, Y.hat)
+})
+
+# creating the table for stations inside G2 group for model 2
+RMSE_Table_G2.tr <- cbind(RMSE_Table_G2.tr,
+                       tibble(Model_Linear_Regression = rmse_g2_m2_detail))
+
+# Looking at RMSE inside G3 group for model 2
+i <- as.character(G3)
+rmse_g3_m2_detail <- sapply(i, function(j){
+  set <- validation_G3 %>%
+    filter(stations == j)
+  Y.hat <- predict(fit_g3_m2.tr, set)
+  RMSE(set$Y.J1, Y.hat)
+})
+
+# creating the table for stations inside G3 group for model 2
+RMSE_Table_G3.tr <- cbind(RMSE_Table_G3.tr,
+                       tibble(Model_Linear_Regression = rmse_g3_m2_detail))
+
+
+############# Model 3
+# creating the table for stations inside G1 group for model 3
+RMSE_Table_G1.tr <- cbind(RMSE_Table_G1.tr, tibble(Model_BRNN = RMSE(predict(fit_g1_m3.tr, validation_G1), validation_G1$Y.J1)))
+
+# Looking at RMSE inside G2 group for model 3
+i <- as.character(G2)
+rmse_g2_m3_detail <- sapply(i, function(j){
+  set <- validation_G2 %>%
+    filter(stations == j)
+  Y.hat <- predict(fit_g2_m3.tr, set)
+  RMSE(set$Y.J1, Y.hat)
+})
+
+# creating the table for stations inside G2 group for model 3
+RMSE_Table_G2.tr <- cbind(RMSE_Table_G2.tr, tibble(Model_BRNN = rmse_g2_m3_detail))
+
+# Looking at RMSE inside G3 group for model 3
+i <- as.character(G3)
+rmse_g3_m3_detail <- sapply(i, function(j){
+  set <- validation_G3 %>%
+    filter(stations == j)
+  Y.hat <- predict(fit_g3_m3.tr, set)
+  RMSE(set$Y.J1, Y.hat)
+})
+
+# creating the table for stations inside G3 group for model 3
+RMSE_Table_G3.tr <- cbind(RMSE_Table_G3.tr, tibble(Model_BRNN = rmse_g3_m3_detail))
+
+
+############# Model 4
+# creating the table for stations inside G1 group for model 4
+RMSE_Table_G1.tr <- cbind(RMSE_Table_G1.tr, tibble(Model_PCR = RMSE(predict(fit_g1_m4.tr, validation_G1), validation_G1$Y.J1)))
+
+# Looking at RMSE inside G2 group for model 4
+i <- as.character(G2)
+rmse_g2_m4_detail <- sapply(i, function(j){
+  set <- validation_G2 %>%
+    filter(stations == j)
+  Y.hat <- predict(fit_g2_m4.tr, set)
+  RMSE(set$Y.J1, Y.hat)
+})
+
+# creating the table for stations inside G2 group for model 4
+RMSE_Table_G2.tr <- cbind(RMSE_Table_G2.tr, tibble(Model_PCR = rmse_g2_m4_detail))
+
+# Looking at RMSE inside G3 group for model 4
+i <- as.character(G3)
+rmse_g3_m4_detail <- sapply(i, function(j){
+  set <- validation_G3 %>%
+    filter(stations == j)
+  Y.hat <- predict(fit_g3_m4.tr, set)
+  RMSE(set$Y.J1, Y.hat)
+})
+
+# creating the table for stations inside G3 group for model 4
+RMSE_Table_G3.tr <- cbind(RMSE_Table_G3.tr, tibble(Model_PCR = rmse_g3_m4_detail))
+
+```
+
+The data is then combined into a single table.
+
+```{r}
+# Combining all single tables to plot an overall table of RMSE of all stations with all methods
+RMSE_Table_G1.tr <- RMSE_Table_G1.tr %>%
+  mutate(Stations = as.numeric(Stations)) %>%
+  mutate(Water_System = "G1") %>%
+  select(6, 1:5)
+
+RMSE_Table_G2.tr <- RMSE_Table_G2.tr %>%
+  mutate(Stations = as.numeric(Stations)) %>%
+  mutate(Water_System = "G2") %>%
+  select(6, 1:5)
+
+RMSE_Table_G3.tr <- RMSE_Table_G3.tr %>%
+  mutate(Stations = as.numeric(Stations)) %>%
+  mutate(Water_System = "G3") %>%
+  select(6, 1:5)
+
+RMSE_Table.tr <- rbind(RMSE_Table_G1.tr, RMSE_Table_G2.tr, RMSE_Table_G3.tr)
+```
+
+The boxplot of this table is shown below:
+
+```{r fig.cap="Boxplot of models for all stations on training set"}
+RMSE_Table_2 <- RMSE_Table.tr %>%
+  pivot_longer(cols = 3:6,
+               names_to = "Model",
+               values_to = "RMSE")
+
+RMSE_Table_2 %>%
+  ggplot(aes(y = RMSE)) +
+  geom_boxplot() +
+  facet_wrap(~ Model)
+```
+
+We can see that we have outliers and the median is below 1 for each model.
+
+\newpage
+
+In the training set, the best model for each station is the following:
+
+```{r fig.cap="Total number of best models for all stations"}
+# Vizualizing the best model for each station.
+Best_RMSE <- RMSE_Table_2 %>%
+  group_by(Stations) %>%
+  dplyr::summarize(RMSE = min(RMSE)) %>%
+  select(`RMSE`) %>%
+  left_join(RMSE_Table_2, by = "RMSE")
+
+Best_RMSE %>%
+  ggplot(aes(x = Model)) +
+  geom_bar(width = 0.3) +
+  scale_y_continuous(breaks = seq(0,50,1))
+```
+
+We can see that in some stations, keeping the same output Y.J1 as the input Y.J0 is the best model!
+The model 3 (brnn) is the most efficient model on stations.
+Model 2 (lm) is the second most efficient model and sometimes can not be beaten.
+Model 4 (pcr) is not a very performing model.
+
+
+\newpage
+
+## Final holdout Test with test_set
+
+### Validation and choice of model
+
+We have tested 4 models. The difference in RMSE between models is not so high.
+
+It has to be noted that linear regression model is performing quite good, and it is hard to have a model performing better than linear regression for this kind of prediction.
+
+From the training set, the best models for each water systems are :
+
+- Model 4 (pcr) for G1
+
+- Model 3 (brnn) for G2 and G3
+
+We will use those models to perform the final holdout test of the 3 water systems.
+
+### Modifications of train and test sets
+
+To apply those models to the testing set, the following modifications must be done:
+
+- Standardization (dividing input and output by 1 step)
+
+- Separating the data of train and test set into groups of water systems (G1, G2 and G3)
+
+```{r}
+# Standardizing test set output
+test_set <- test_set %>%
+  mutate(Y.J0 = Y.J0/dist_out) %>%
+  mutate(Y.J1 = Y.J1/dist_out)
+
+# Dividing the data of train and test set by groups of water systems
+train_f_G1 <- train_set %>%
+  filter(System == "G1")
+train_f_G2 <- train_set %>%
+  filter(System == "G2")
+train_f_G3 <- train_set %>%
+  filter(System == "G3")
+
+test_f_G1 <- test_set %>%
+  filter(System == "G1")
+test_f_G2 <- test_set %>%
+  filter(System == "G2")
+test_f_G3 <- test_set %>%
+  filter(System == "G3")
+```
+
+### Final Holdout Test
+
+We apply the models on each group of water systems of the test set, and we get the following table:
+```{r include=FALSE}
+################# Model 4
+# Calculating the model with train set
+fit_g1_m4.te <- train(Y.J1 ~ P2.max + P3.max + Y.J0,
+                      method = "pcr",
+                      tuneGrid = expand.grid(ncomp = k_g1_m4),
+                      data = train_f_G1)
+set.seed(1, sample.kind = "Rounding")
+Y.hat_g1_m4 <- predict(fit_g1_m4.te, test_f_G1)
+rmse_g1_m4 <-   RMSE(test_f_G1$Y.J1, Y.hat_g1_m4)
+
+
+# Tabulate group RMSE
+RMSE_Table_global.te <- tibble(RMSE_G1_Test_Set = rmse_g1_m4)
+
+################### Model 3
+# Calculating the model with train set
+fit_g2_m3.te <- train(Y.J1 ~ P2.max + P3.max + Y.J0 + stations,
+                      method = "brnn",
+                      tuneGrid = expand.grid(neurons = k_g2_m3),
+                      data = train_f_G2)
+set.seed(1, sample.kind = "Rounding")
+Y.hat_g2_m3 <- predict(fit_g2_m3.te, test_f_G2)
+rmse_g2_m3 <-  RMSE(test_f_G2$Y.J1, Y.hat_g2_m3)
+
+fit_g3_m3.te <- train(Y.J1 ~ P2.max + P3.max + Y.J0 + stations,
+                      method = "brnn",
+                      tuneGrid = expand.grid(neurons = k_g3_m3),
+                      data = train_f_G3)
+set.seed(1, sample.kind = "Rounding")
+Y.hat_g3_m3 <- predict(fit_g3_m3.te, test_f_G3)
+rmse_g3_m3 <- RMSE(test_f_G3$Y.J1, Y.hat_g3_m3)
+
+```
+
+```{r}
+# Tabulate group RMSE
+RMSE_Table_global.te <- cbind(RMSE_Table_global.te, tibble(RMSE_G2_Test_Set = rmse_g2_m3, RMSE_G3_Test_Set = rmse_g3_m3))
+RMSE_Table_global.te %>%
+  knitr::kable(caption = "Final Holdout Test", booktabs = T, linesep = "") %>%
+  kable_styling(full_width = FALSE, latex_options = c("hold_position"))
+```
+
+The RMSE of G1 is similar to the validation test.
+The RMSE obtained for G2 and G3 are acceptable, however a bit higher than expected in comparison to validation sequence:
+it could be the result of some stations that do not behave like the others (different correlations, external influence,...) and impact the RMSE of the group.
+
+\newpage
+
+# **Conclusions**
+A water quality prediction model is created, with data from [UCI Machine Learning Repository](https://archive-beta.ics.uci.edu/).
+The data is built into train and test set from the package received after downloading.
+A quick look at distance and correlation shows that the predictors P2.max and P3.max are key to predict the output, together with input Y.J0.
+The sets are divided into groups of water systems, because the interconnection between the stations in each group generates relation between outputs.
+It is also easier and faster to have a total of 3 models, one for each group of water systems, rather than having models for each of the 37 stations.
+4 models are applied to train_test :
+
+- Same prediction for tomorrow as today
+
+- Linear Regression
+
+- Bayesian Regularized Neural Networks
+
+- Principal Components Regression
+
+The models are then tested with a validation set (20% of the train set).
+Finally, the final holdout test is performed on the test_set.
+
+The results are encouraging. The G1 group has a RMSE close to the one during validation phase.
+The G2 and G3 group have a RMSE slightly higher than the validation phase, but their groups are much bigger and some stations might be less responsive to the built models.
+
+**Limitations**
+
+As seen during validation phase, some stations in groups 2 and 3 of water systems do not behave like the other stations.
+So, their RMSE have a negative and significant impact on the RMSE of the group.
+2 predictors and 1 input are used for all groups. Some stations might be less sensitive to these predictors compare to other stations.
+Moreover, the gain with advanced models (brnn, pcr) compare to linear regression is small.
+
+**Future Scope**
+
+One idea would be to extract some of the stations from the groups, for example the stations with little correlation or the outliers on the boxplot of RMSE, and to treat them separately.
+Another idea would be to build models for each and every station, but it would need much more time to build and to run.
+We could also try to "play" more with the parameters from the selected models (tuneControl, tuneGrid), or we could investigate other types of models in caret package.
+Finally, we did not use the time sequence, and its influence could be checked (as recommended by [1]).
+
+\newpage
+
+# **References**
+
+1. [Jian Zhou, Yuanyuan Wang, Fu Xiao, Yunyun Wang, Lijuan Sun. August 2018. “Water Quality Prediction Methode Based on IGRA and LSTM” MDPI Water Journal](file:///C:/Users/H13456/AppData/Local/Temp/water-10-01148.pdf)
+
+2. [Irizarry, Rafael A. 2020. Introduction to Data Science: Data Analysis and Prediction Algorithms with r. CRC Press](https://rafalab.github.io/dsbook/)
+
